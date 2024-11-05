@@ -27,7 +27,8 @@ MASTER_CONFIG = {
     'd_model': 128,
     'vocab_size': 65,
     'epochs': 1000,          # Number of training epochs
-    'log_interval': 10      # Log information every 10 batches during training
+    'log_interval': 10,      # Log information every 10 batches during training
+    'n_heads': 8
 }
 
 # Read the content of the dataset
@@ -118,43 +119,72 @@ def evaluate_loss(model, config=MASTER_CONFIG):
     
     return out
 
-# Definition of a basic neural network class
-class SimpleModel(nn.Module):
-    def __init__(self, config=MASTER_CONFIG):
+# Define the SimpleModel_RMS with RMSNorm
+class RopeModel(nn.Module):
+    def __init__(self, config):
         super().__init__()
         self.config = config
 
-        # Embedding layer to convert character indices to vectors (vocab size: 65)
+        # Embedding layer for input tokens
         self.embedding = nn.Embedding(config['vocab_size'], config['d_model'])
+        
+        # RMSNorm layer for pre-normalization
+        self.rms = RMSNorm((config['context_window'], config['d_model']))
+        
+        # RoPEMaskedMultiheadAttention layer
+        self.rope_attention = RoPEMaskedMultiheadAttention(config)
 
-        # Linear layers for modeling relationships between features
-        # (to be updated with SwiGLU activation function as in LLaMA)
+        # Linear layer followed by ReLU activation
         self.linear = nn.Sequential(
             nn.Linear(config['d_model'], config['d_model']),
-            nn.ReLU(),  # Currently using ReLU, will be replaced with SwiGLU as in LLaMA
-            nn.Linear(config['d_model'], config['vocab_size']),
+            nn.ReLU(),
         )
 
-    def forward(self, idx, targets=None):
-        # Embedding layer converts character indices to vectors
-        x = self.embedding(idx)
-        
-        # Linear layers for modeling relationships between features
-        logits = self.linear(x)
+        # Final linear layer for prediction
+        self.last_linear = nn.Linear(config['d_model'], config['vocab_size'])
 
-        # If targets are provided, calculate and return the cross-entropy loss
+        print("model params:", sum([m.numel() for m in self.parameters()]))
+
+    def forward(self, idx, targets=None):
+        # idx: input indices
+        x = self.embedding(idx)
+
+        # One block of attention
+        x = self.rms(x)  # RMS pre-normalization
+        x = x + self.rope_attention(x)
+
+        x = self.rms(x)  # RMS pre-normalization
+        x = x + self.linear(x)
+
+        logits = self.last_linear(x)
+
         if targets is not None:
-            # Reshape logits and targets for cross-entropy calculation
             loss = F.cross_entropy(logits.view(-1, self.config['vocab_size']), targets.view(-1))
             return logits, loss
 
-        # If targets are not provided, return the logits
         else:
             return logits
 
-        # Print the total number of model parameters
-        print("Model parameters:", sum([m.numel() for m in self.parameters()]))
+class RMSNorm(nn.Module):
+    def __init__(self, layer_shape, eps=1e-8, bias=False):
+        super(RMSNorm, self).__init__()
 
+        # Registering a learnable parameter 'scale' as a parameter of the module
+        self.register_parameter("scale", nn.Parameter(torch.ones(layer_shape)))
+
+    def forward(self, x):
+        """
+        Assumes shape is (batch, seq_len, d_model)
+        """
+        # Calculating the Frobenius norm, RMS = 1/sqrt(N) * Frobenius norm
+        ff_rms = torch.linalg.norm(x, dim=(1,2)) * x[0].numel() ** -.5
+
+        # Normalizing the input tensor 'x' with respect to RMS
+        raw = x / ff_rms.unsqueeze(-1).unsqueeze(-1)
+
+        # Scaling the normalized tensor using the learnable parameter 'scale'
+        return self.scale[:x.shape[1], :].unsqueeze(0) * raw
+    
 # Function to perform training
 def train(model, optimizer, scheduler=None, config=MASTER_CONFIG, print_logs=False):
     # Placeholder for storing losses
@@ -210,8 +240,97 @@ def train(model, optimizer, scheduler=None, config=MASTER_CONFIG, print_logs=Fal
     # Plot the training and validation loss curves
     return pd.DataFrame(losses).plot()
 
-# Create the updated SimpleModel
-model = SimpleModel(MASTER_CONFIG)
+class RoPEMaskedAttentionHead(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.w_q = nn.Linear(config['d_model'], config['d_model'], bias=False)
+        self.w_k = nn.Linear(config['d_model'], config['d_model'], bias=False)
+        self.w_v = nn.Linear(config['d_model'], config['d_model'], bias=False)
+
+        self.R = get_rotary_matrix(config['context_window'], config['d_model'])
+
+    def get_rotary_matrix(context_window, embedding_dim):
+        R = torch.zeros((context_window, embedding_dim, embedding_dim), requires_grad=False)
+        for position in range(context_window):
+            for i in range(embedding_dim//2):
+                theta = 10000. ** (-2.*(i - 1) / embedding_dim)
+                m_theta = position * theta
+                R[position, 2*i,2*i] = np.cos(m_theta)
+                R[position, 2*i,2*i+1] = - np.sin(m_theta)
+                R[position, 2*i+1,2*i] = np.sin(m_theta)
+                R[position, 2*i+1,2*i+1] = np.cos(m_theta)
+        return R
+    
+    def forward(self, x, return_attn_weights=False):
+        b,m,d = x.shape
+        
+        q = self.w_q(x)
+        k = self.w_k(x)
+        v = self.w_v(x)
+
+        q_rotated = (torch.bmm(q.transpose(0,1), self.R[:m])).transpose(0,1)
+        k_rotated = (torch.bmm(k.transpose(0,1), self.R[:m])).transpose(0,1)
+
+        activations = F.scaled_dot_product_attention(
+            q_rotated,k_rotated,v,dropout_p =.1, is_causal=True
+        )
+
+        if return_attn_weights:
+            attn_mask = torch.tril(torch.ones((m,m)), diagonal=0)
+            attn_weights = torch.bmm(q_rotated, k_rotated.transpose(1,2)) / np.sqrt(d) + attn_mask
+            attn_weights = F.softmax(attn_weights, dim=-1)
+            return activations, attn_weights
+        return activations
+    
+class RoPEMaskedMultiheadAttention(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        # Create a list of RoPEMaskedAttentionHead instances as attention heads
+        self.heads = nn.ModuleList([
+            RoPEMaskedAttentionHead(config) for _ in range(config['n_heads'])
+        ])
+        self.linear = nn.Linear(config['n_heads'] * config['d_model'], config['d_model'])  # Linear layer after concatenating heads
+        self.dropout = nn.Dropout(.1)  # Dropout layer
+
+    def forward(self, x):
+        # x: input tensor of shape (batch, sequence length, dimension)
+
+        # Process each attention head and concatenate the results
+        heads = [h(x) for h in self.heads]
+        x = torch.cat(heads, dim=-1)
+        
+        # Apply linear transformation to the concatenated output
+        x = self.linear(x)
+        
+        # Apply dropout
+        x = self.dropout(x)
+        return x
+
+class SwiGLU(nn.Module):
+    """
+    Swish-Gated Linear Unit
+    https://arxiv.org/pdf/2002.05202v1.pdf
+    """
+    def __init__(self, size):
+        super().__init__()
+        self.config = config
+        self.linear_gate = nn.Linear(size, size)
+        self.linear = nn.Linear(size, size)
+        self.beta = torch.randn(1, requires_grad=True)
+
+        self.beta = nn.Parameter(torch.ones(1))
+        self.register_parameter("beta", self.beta)
+
+    def forward(self, x): 
+        swish_gate = self.linear_gate(x) * torch.sigmoid(self.beta * self.linear_gate(x))
+        out = swish_gate * self.linear(x)
+        return out
+
+
+# Create an instance of RopeModel (RMSNorm, RoPE, Multi-Head)
+model = RopeModel(MASTER_CONFIG)
 
 # Obtain batches for training
 xs, ys = get_batches(dataset, 'train', MASTER_CONFIG['batch_size'], MASTER_CONFIG['context_window'])
@@ -222,8 +341,8 @@ logits, loss = model(xs, ys)
 # Define the Adam optimizer for model parameters
 optimizer = torch.optim.Adam(model.parameters())
 
-# Train the model for 100 epochs
-train(model, optimizer)
+# Train the model
+train(model, optimizer, print_logs=True)
 
 # Generate function for text generation using the trained model
 def generate(model, config=MASTER_CONFIG, max_new_tokens=30):
