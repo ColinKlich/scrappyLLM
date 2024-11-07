@@ -76,32 +76,6 @@ def evaluate_loss(model, config=MASTER_CONFIG):
     model.train()
     return out
 
-# class SimpleBrokenModel(nn.Module):
-#     def __init__(self, config=MASTER_CONFIG):
-#         super().__init__()
-#         self.config = config
-
-#         self.embedding = nn.Embedding(config['vocab_size'], config['d_model'])
-#         self.linear = nn.Sequential(
-#             nn.Linear(config['d_model'], config['d_model']),
-#             nn.ReLU(),
-#             nn.Linear(config['d_model'], config['vocab_size']),
-#         )
-
-#         print("model params:", sum([m.numel() for m in self.parameters()]))
-
-#     def forward(self, idx, targets=None):
-#         x = self.embedding(idx)
-#         a = self.linear(x)
-#         logits = F.softmax(a, dim=-1)
-
-#         if targets is not None:
-#             loss = F.cross_entropy(logits.view(-1, self.config['vocab_size']), targets.view(-1))
-#             return logits, loss
-
-#         else:
-#             return logits
-
 def train(model, optimizer, scheduler=None, config=MASTER_CONFIG, print_logs=False):
     losses = []
     start_time = time.time()
@@ -130,45 +104,36 @@ def train(model, optimizer, scheduler=None, config=MASTER_CONFIG, print_logs=Fal
     print("validation loss: ", losses[-1]['val'])
     return pd.DataFrame(losses).plot()
 
-# class SimpleModel(nn.Module):
-#     def __init__(self, config):
-#         super().__init__()
-#         self.config = config
+# def generate(model, config=MASTER_CONFIG, max_new_tokens=30):
+#     idx = torch.zeros(5, 1).long()
+#     for _ in range(max_new_tokens):
+#         # call the model
+#         logits = model(idx[:, -config['context_window']:])
+#         last_time_step_logits = logits[
+#             :, -1, :
+#         ]  # all the batches (1), last time step, all the logits
+#         p = F.softmax(last_time_step_logits, dim=-1)  # softmax to get probabilities
+#         idx_next = torch.multinomial(
+#             p, num_samples=1
+#         )  # sample from the distribution to get the next token
+#         idx = torch.cat([idx, idx_next], dim=-1)  # append to the sequence
+#     return [decode(x) for x in idx.tolist()]
 
-#         self.embedding = nn.Embedding(config['vocab_size'], config['d_model'])
-#         self.linear = nn.Sequential(
-#             nn.Linear(config['d_model'], config['d_model']),
-#             nn.ReLU(),
-#             nn.Linear(config['d_model'], config['vocab_size']),
-#         )
+def generate_response(model, user_input, config=MASTER_CONFIG, max_new_tokens=30):
+    # Encode the user input to create the initial tensor for the model
+    idx = encode(user_input).unsqueeze(0).long()  # Convert input to tensor and add batch dimension
 
-#         print("model params:", sum([m.numel() for m in self.parameters()]))
-
-#     def forward(self, idx, targets=None):
-#         x = self.embedding(idx)
-#         logits = self.linear(x)
-
-#         if targets is not None:
-#             loss = F.cross_entropy(logits.view(-1, self.config['vocab_size']), targets.view(-1))
-#             return logits, loss
-
-#         else:
-#             return logits
-
-def generate(model, config=MASTER_CONFIG, max_new_tokens=30):
-    idx = torch.zeros(5, 1).long()
     for _ in range(max_new_tokens):
-        # call the model
+        # Call the model
         logits = model(idx[:, -config['context_window']:])
-        last_time_step_logits = logits[
-            :, -1, :
-        ]  # all the batches (1), last time step, all the logits
-        p = F.softmax(last_time_step_logits, dim=-1)  # softmax to get probabilities
-        idx_next = torch.multinomial(
-            p, num_samples=1
-        )  # sample from the distribution to get the next token
-        idx = torch.cat([idx, idx_next], dim=-1)  # append to the sequence
-    return [decode(x) for x in idx.tolist()]
+        last_time_step_logits = logits[:, -1, :]  # Get logits for the last time step
+        p = F.softmax(last_time_step_logits, dim=-1)  # Apply softmax to get probabilities
+        idx_next = torch.multinomial(p, num_samples=1)  # Sample from the distribution for the next token
+        idx = torch.cat([idx, idx_next], dim=-1)  # Append the new token to the sequence
+
+    # Decode the generated sequence to readable text
+    response = decode(idx[0].tolist())
+    return response
 
 class RMSNorm(nn.Module):
     def __init__(self, layer_shape, eps=1e-8, bias=False):
@@ -183,33 +148,6 @@ class RMSNorm(nn.Module):
         ff_rms = torch.linalg.norm(x, dim=(1,2)) * x[0].numel() ** -.5
         raw = x / ff_rms.unsqueeze(-1).unsqueeze(-1)
         return self.scale[:x.shape[1], :].unsqueeze(0) * raw
-
-# class SimpleModel_RMS(nn.Module):
-#     def __init__(self, config):
-#         super().__init__()
-#         self.config = config
-
-#         self.embedding = nn.Embedding(config['vocab_size'], config['d_model'])
-#         self.rms = RMSNorm((config['context_window'], config['d_model']))
-#         self.linear = nn.Sequential(
-#             nn.Linear(config['d_model'], config['d_model']),
-#             nn.ReLU(),
-#             nn.Linear(config['d_model'], config['vocab_size']),
-#         )
-
-#         print("model params:", sum([m.numel() for m in self.parameters()]))
-
-#     def forward(self, idx, targets=None):
-#         x = self.embedding(idx)
-#         x = self.rms(x) # rms pre-normalization
-#         logits = self.linear(x)
-
-#         if targets is not None:
-#             loss = F.cross_entropy(logits.view(-1, self.config['vocab_size']), targets.view(-1))
-#             return logits, loss
-
-#         else:
-#             return logits
 
 def get_rotary_matrix(context_window, embedding_dim):
     R = torch.zeros((context_window, embedding_dim, embedding_dim), requires_grad=False)
@@ -361,9 +299,6 @@ class LlamaBlock(nn.Module):
         x = x + self.feedforward(x)
         return x
 
-# block = LlamaBlock(config=MASTER_CONFIG)
-# block(torch.randn(MASTER_CONFIG['batch_size'], MASTER_CONFIG['context_window'], MASTER_CONFIG['d_model']));
-
 class Llama(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -397,10 +332,11 @@ llama = Llama(config=MASTER_CONFIG)
 optimizer = torch.optim.Adam(llama.parameters())
 train(llama, optimizer, scheduler=None, config=MASTER_CONFIG)
 
-print(generate(llama, MASTER_CONFIG, 500)[0])
+#print(generate(llama, MASTER_CONFIG, 500)[0])
 
-xs, ys = get_batches(dataset, 'test', MASTER_CONFIG['batch_size'], MASTER_CONFIG['context_window'])
+# Get user input
+user_input = input("Enter your prompt: ")
 
-logits, loss = llama(xs, ys)
-
-print(loss)
+# Generate and print the response using the trained model
+output = generate_response(llama, user_input)
+print("Generated Response:", output)
