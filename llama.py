@@ -28,7 +28,8 @@ MASTER_CONFIG = {
     'vocab_size': 65,
     'epochs': 1000,          # Number of training epochs
     'log_interval': 10,      # Log information every 10 batches during training
-    'n_heads': 8
+    'n_heads': 8,
+    'n_layers': 4
 }
 
 # Read the content of the dataset
