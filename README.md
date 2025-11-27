@@ -15,6 +15,14 @@ This project is a hands-on exploration into building a modern transformer-based 
 
 The model is trained on the "Tiny Shakespeare" dataset to generate character-level text in a similar style.
 
+## Progress
+![[10,000epochs]](./Assets/Screenshot%202025-11-26%20at%208.26.55 PM.png)
+
+- After 10,000 epochs, the model can reproduce most of the shakespeare text.
+- Further training without more data could result in overfitting
+- Training Loss improvement: 3.779 -> 1.303
+- Validation Loss improvement: 3.803 -> 1.548
+
 ## Getting Started
 
 Follow these steps to get the project running on your local machine.
