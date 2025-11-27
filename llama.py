@@ -346,7 +346,9 @@ class LlamaBlock(nn.Module):
         super().__init__()
         self.config = config
 
-        self.rms = RMSNorm((config['context_window'], config['d_model']))
+        # Layer normalization using RMSNorm
+        # Removed context_window from shape to match input dimensions
+        self.rms = RMSNorm((config['d_model'],))
         
         self.attention = RoPEMaskedMultiheadAttention(config)
         self.feedforward = nn.Sequential(
