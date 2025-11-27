@@ -198,7 +198,7 @@ def train(model, optimizer, scheduler=None, config=MASTER_CONFIG, print_logs=Fal
             
             # Print progress logs if specified
             if print_logs:
-                print(f"Epoch {epoch} | val loss {x['val']:.3f} | Time {batch_time:.3f} | ETA in seconds {batch_time * (config['epochs'] - epoch)/config['log_interval'] :.3f}")
+                print(f"Epoch {epoch} | train loss {x['train']:.3f} | val loss {x['val']:.3f} | Time {batch_time:.3f} | ETA in seconds {batch_time * (config['epochs'] - epoch)/config['log_interval'] :.3f}")
                 
             # Reset the timer
             start_time = time.time()
