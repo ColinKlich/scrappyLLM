@@ -232,12 +232,9 @@ class RMSNorm(nn.Module):
         """
         Assumes shape is (batch, seq_len, d_model)
         """
-        # Calculating the Frobenius norm, RMS = 1/sqrt(N) * Frobenius norm
-        norm_x = x.norm(2, dim=(1,2), keepdim=True)
-        rms_x = norm_x * (x.shape[1] * x.shape[2])**-0.5
-
-        # Normalizing the input tensor 'x' with respect to RMS
-        x_normed = x / (rms_x + self.eps)
+        # The RMSNorm paper suggests normalizing over the last dimension
+        norm_x = torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        x_normed = x * norm_x
 
         # Scaling the normalized tensor using the learnable parameter 'scale'
         return self.scale * x_normed
