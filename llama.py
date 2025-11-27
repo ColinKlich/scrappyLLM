@@ -253,7 +253,7 @@ class RoPEMaskedAttentionHead(nn.Module):
         self.w_k = nn.Linear(config['d_model'], config['d_model'], bias=False)
         self.w_v = nn.Linear(config['d_model'], config['d_model'], bias=False)
 
-        self.R = self.get_rotary_matrix(config['context_window'], config['d_model'])
+        self.register_buffer('R', self.get_rotary_matrix(config['context_window'], config['d_model']))
 
     @staticmethod
     def get_rotary_matrix(context_window, embedding_dim):
@@ -406,7 +406,6 @@ def generate(model, config=MASTER_CONFIG, max_new_tokens=30):
     Returns:
         list[str]: A list of generated text samples.
     """
-    idx = torch.zeros(5, 1).long()
     # Start with a tensor of zeros on the correct device
     idx = torch.zeros(5, 1).long().to(device)
     for _ in range(max_new_tokens):
