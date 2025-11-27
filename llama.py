@@ -281,9 +281,6 @@ class RoPEMaskedAttentionHead(nn.Module):
         q_rotated = (torch.bmm(q.transpose(0, 1), self.R[:m, ...])).transpose(0, 1)
         k_rotated = (torch.bmm(k.transpose(0, 1), self.R[:m, ...])).transpose(0, 1)
 
-        q_rotated = q_rotated.transpose(1,2)
-        k_rotated = k_rotated.transpose(1,2)
-
         activations = F.scaled_dot_product_attention(
             q_rotated, k_rotated, v, dropout_p=.1, is_causal=True
         )
