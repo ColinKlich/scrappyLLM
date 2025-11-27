@@ -14,6 +14,10 @@ import time
 import pandas as pd
 from collections import OrderedDict
 
+# --- Device Configuration ---
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f"Using device: {device}")
+
 # --- Configuration ---
 MASTER_CONFIG = {
     'batch_size': 32,          # Number of batches to be processed at each random split
@@ -97,6 +101,9 @@ def get_batches(data, split, batch_size, context_window, config=MASTER_CONFIG):
     # Create input sequences (x) and corresponding target sequences (y)
     x = torch.stack([batch_data[i:i+context_window] for i in ix]).long()
     y = torch.stack([batch_data[i+1:i+context_window+1] for i in ix]).long()
+
+    # Move batches to the selected device
+    x, y = x.to(device), y.to(device)
 
     return x, y
 
@@ -400,11 +407,14 @@ def generate(model, config=MASTER_CONFIG, max_new_tokens=30):
         list[str]: A list of generated text samples.
     """
     idx = torch.zeros(5, 1).long()
+    # Start with a tensor of zeros on the correct device
+    idx = torch.zeros(5, 1).long().to(device)
     for _ in range(max_new_tokens):
         # Crop idx to the last context_window tokens
         logits = model(idx[:, -config['context_window']:])
         # Get the logits for the last time step
         last_time_step_logits = logits[:, -1, :]
+        
         # Apply softmax to get probabilities
         p = F.softmax(last_time_step_logits, dim=-1)
         # Sample from the distribution to get the next token
@@ -418,6 +428,9 @@ def generate(model, config=MASTER_CONFIG, max_new_tokens=30):
 if __name__ == '__main__':
     # Create an instance of the LlamaModel
     model = LlamaModel(MASTER_CONFIG)
+    
+    # Move the model to the selected device
+    model.to(device)
 
     # Define the Adam optimizer for model parameters
     optimizer = torch.optim.Adam(model.parameters())
