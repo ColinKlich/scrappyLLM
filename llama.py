@@ -277,9 +277,15 @@ class RoPEMaskedAttentionHead(nn.Module):
         q = self.w_q(x)
         k = self.w_k(x)
         v = self.w_v(x)
+        
+        # Fixed Tensor shape mismatch issues with bmm, so we do some transposes.
+        # RoPE rotation allows us to apply positional embeddings without adding them directly.
+        # Can now produce text up to context_window in length.
+        q_rotated = (torch.bmm(q.transpose(0, 1), self.R[:m, ...])).transpose(0, 1)
+        k_rotated = (torch.bmm(k.transpose(0, 1), self.R[:m, ...])).transpose(0, 1)
 
-        q_rotated = (torch.bmm(q.transpose(0,1), self.R[:m])).transpose(0,1)
-        k_rotated = (torch.bmm(k.transpose(0,1), self.R[:m])).transpose(0,1)
+        q_rotated = q_rotated.transpose(1,2)
+        k_rotated = k_rotated.transpose(1,2)
 
         activations = F.scaled_dot_product_attention(
             q_rotated, k_rotated, v, dropout_p=.1, is_causal=True
