@@ -88,6 +88,10 @@ def exportModel(model):
     Args:
         model (nn.Module): The model to be saved.
     """
+    # Apply quantization to the model for reduced size and faster inference
+    # model = torch.quantization.quantize_dynamic(
+    #     model, {nn.Linear}, dtype=torch.qint8
+    # )
     torch.save(model.state_dict(), "./models/llama_model.pth")
 
 # --- Data Batching ---
