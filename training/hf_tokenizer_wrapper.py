@@ -55,24 +55,14 @@ class HFTokenizerWrapper:
         # 1. Remove space-marker character if present (Ġ)
         decoded = decoded.replace('Ġ', ' ')
 
-        # 2. Fix spacing issues - remove spaces within words
-        # Common pattern: single letters with spaces should be joined
+        # 2. Fix specific BPE spacing issues
         import re
 
-        # Pattern 1: Fix single character fragments like "r ome o" -> "romeo"
-        # Look for pattern of letter-space-letter where both are lowercase
-        decoded = re.sub(r'\b([a-z]) ([a-z]{1,3})\b', r'\1\2', decoded)
-        decoded = re.sub(r'\b([a-z]) ([a-z]{1,3}) ([a-z])\b', r'\1\2\3', decoded)
-
-        # Pattern 2: Fix names like "Ca i us" -> "Caius"
-        decoded = re.sub(r'\b([A-Z][a-z]?) ([a-z]) ([a-z]+)\b', r'\1\2\3', decoded)
-        decoded = re.sub(r'\b([A-Z][a-z]+) ([a-z]) ([a-z]+)\b', r'\1\2\3', decoded)
-
-        # Pattern 3: Collapse multiple spaces
-        decoded = re.sub(r' +', ' ', decoded)
-
-        # Pattern 4: Fix contractions like "didn ' t" -> "didn't"
+        # Pattern 1: Fix contractions like "didn ' t" -> "didn't"
         decoded = re.sub(r" ' (t|s|m|d|ll|ve|re)\b", r"'\1", decoded)
+
+        # Pattern 2: Collapse multiple consecutive spaces
+        decoded = re.sub(r' +', ' ', decoded)
 
         return decoded.strip()
 

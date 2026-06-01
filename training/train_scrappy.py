@@ -36,6 +36,10 @@ def parse_args():
         help='Path to training data (text file)'
     )
     parser.add_argument(
+        '--val_data', type=str, default=None,
+        help='Path to validation data (text file). If not provided, splits training data 80/10/10.'
+    )
+    parser.add_argument(
         '--out_dir', type=str, default='./out',
         help='Output directory for checkpoints'
     )
@@ -467,12 +471,23 @@ def main():
     
     # Prepare dataset
     print("\n=== Preparing Dataset ===")
-    
+
     # Load training data
     with open(args.data, 'r', encoding='utf-8') as f:
-        text = f.read()
-    
-    print(f"Loaded {len(text):,} characters from {args.data}")
+        train_text = f.read()
+
+    print(f"Loaded {len(train_text):,} characters from {args.data}")
+
+    # Load validation data if provided
+    if args.val_data and os.path.exists(args.val_data):
+        with open(args.val_data, 'r', encoding='utf-8') as f:
+            val_text = f.read()
+        print(f"Loaded {len(val_text):,} characters from {args.val_data}")
+        use_separate_val = True
+    else:
+        val_text = None
+        use_separate_val = False
+        print("No separate validation file provided - will split training data")
 
     # Load or create tokenizer
     if args.tokenizer and os.path.exists(args.tokenizer):
@@ -483,33 +498,50 @@ def main():
         print(f"Loaded tokenizer: vocab_size={vocab_size}")
     else:
         print("Creating CharTokenizer from training data...")
-        tokenizer = CharTokenizer(text)
+        tokenizer = CharTokenizer(train_text)
         vocab_size = tokenizer.vocab_size
         print(f"Character vocabulary: {vocab_size} unique characters")
 
-    # Encode text using tokenizer
-    print("Tokenizing text...")
+    # Encode training text
+    print("Tokenizing training data...")
     if hasattr(tokenizer, 'hf_tokenizer'):
         # BPE tokenizer - encode in chunks for large files
         chunk_size = 10_000_000  # 10MB chunks
-        encoded = []
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i:i + chunk_size]
-            encoded.extend(tokenizer.encode(chunk))
-            progress = min(100, int((i + chunk_size) / len(text) * 100))
-            print(f"  Tokenizing: {progress}%", end='\r')
-        print(f"  Tokenizing: 100% - Complete!")
+        train_encoded = []
+        for i in range(0, len(train_text), chunk_size):
+            chunk = train_text[i:i + chunk_size]
+            train_encoded.extend(tokenizer.encode(chunk))
+            progress = min(100, int((i + chunk_size) / len(train_text) * 100))
+            print(f"  Tokenizing training: {progress}%", end='\r')
+        print(f"  Tokenizing training: 100% - Complete!")
     else:
         # CharTokenizer - fast enough for full text
-        encoded = tokenizer.encode(text)
-    
-    # Split data
-    train_size = int(0.8 * len(encoded))
-    val_size = int(0.1 * len(encoded))
-    
-    train_data = encoded[:train_size]
-    val_data = encoded[train_size:train_size + val_size]
-    
+        train_encoded = tokenizer.encode(train_text)
+
+    # Encode or split validation data
+    if use_separate_val:
+        print("Tokenizing validation data...")
+        if hasattr(tokenizer, 'hf_tokenizer'):
+            val_encoded = []
+            for i in range(0, len(val_text), chunk_size):
+                chunk = val_text[i:i + chunk_size]
+                val_encoded.extend(tokenizer.encode(chunk))
+                progress = min(100, int((i + chunk_size) / len(val_text) * 100))
+                print(f"  Tokenizing validation: {progress}%", end='\r')
+            print(f"  Tokenizing validation: 100% - Complete!")
+        else:
+            val_encoded = tokenizer.encode(val_text)
+
+        train_data = train_encoded
+        val_data = val_encoded
+    else:
+        # Split training data 80/10/10
+        train_size = int(0.8 * len(train_encoded))
+        val_size = int(0.1 * len(train_encoded))
+
+        train_data = train_encoded[:train_size]
+        val_data = train_encoded[train_size:train_size + val_size]
+
     print(f"Training tokens: {len(train_data):,}")
     print(f"Validation tokens: {len(val_data):,}")
     

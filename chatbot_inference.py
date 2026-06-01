@@ -2,19 +2,21 @@
 """
 Chatbot inference script for interacting with fine-tuned model.
 Interactive chat session with the trained chatbot.
+Supports both safetensors and PyTorch checkpoint formats.
 """
 
 import torch
 from training import GPT, ModelConfig, Tokenizer, CharTokenizer
 from query import generate_simple
 import os
+import json
 
 
 def load_chatbot(checkpoint_path: str, tokenizer_path: str, device: str = "auto"):
-    """Load trained chatbot model.
+    """Load trained chatbot model from safetensors or PyTorch checkpoint.
 
     Args:
-        checkpoint_path: Path to checkpoint file
+        checkpoint_path: Path to checkpoint file (.safetensors or .pt)
         device: Device to use
 
     Returns:
@@ -28,14 +30,51 @@ def load_chatbot(checkpoint_path: str, tokenizer_path: str, device: str = "auto"
         else:
             device = "cpu"
 
-    print(f"Loading chatbot from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    # Determine file format
+    use_safetensors = False
+    if checkpoint_path.endswith('.safetensors'):
+        # Explicit safetensors path provided
+        safetensors_path = checkpoint_path
+        config_path = checkpoint_path.replace('.safetensors', '_config.json')
+        use_safetensors = True
+    else:
+        # Check for safetensors format alongside .pt file
+        safetensors_path = checkpoint_path.replace('.pt', '.safetensors')
+        config_path = checkpoint_path.replace('.pt', '_config.json')
 
-    # Extract config
-    config_data = checkpoint['config']
+        if os.path.exists(safetensors_path):
+            use_safetensors = True
 
-    # First, try to infer actual model dimensions from state dict
-    model_state = checkpoint['model']
+    # Try to import safetensors if needed
+    if use_safetensors:
+        try:
+            from safetensors.torch import load_file
+            print(f"Loading chatbot from safetensors: {safetensors_path}")
+        except ImportError:
+            print("Warning: safetensors package not installed, falling back to PyTorch checkpoint")
+            print("Install with: pip install safetensors")
+            use_safetensors = False
+
+    if use_safetensors and os.path.exists(safetensors_path):
+        # Load from safetensors format
+        model_state = load_file(safetensors_path, device=device)
+
+        # Load config from JSON
+        if os.path.exists(config_path):
+            print(f"Loading config from {config_path}")
+            with open(config_path, 'r') as f:
+                config_data = json.load(f)
+        else:
+            print("Warning: Config file not found, will infer from model state")
+            config_data = {}
+    else:
+        # Fall back to PyTorch checkpoint
+        print(f"Loading chatbot from PyTorch checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        model_state = checkpoint['model']
+        config_data = checkpoint.get('config', {})
+
+    # Infer actual model dimensions from state dict
     actual_n_embd = None
     actual_n_layer = None
     actual_block_size = None
@@ -80,7 +119,7 @@ def load_chatbot(checkpoint_path: str, tokenizer_path: str, device: str = "auto"
 
     # Load model
     model = GPT(model_config).to(device)
-    model.load_state_dict(checkpoint['model'])
+    model.load_state_dict(model_state)
     model.eval()
 
     print(f"Loaded successfully: {model.num_parameters() / 1e6:.2f}M parameters")
@@ -150,11 +189,6 @@ def chat_with_model(model, tokenizer, max_tokens: int = 80, temperature: float =
                 else:
                     response = response.replace(prompt, "").strip()
 
-                # Clean up extra spaces between characters (BPE tokenizer artifact)
-                # Replace multiple spaces with single space
-                import re
-                response = re.sub(r'\s+', ' ', response)
-
                 print(f"Bot: {response}\n")
             else:
                 print("Bot: [No response generated]\n")
@@ -191,7 +225,7 @@ def test_chatbot(model, tokenizer, test_questions: list = None):
             model,
             tokenizer,
             prompt,
-            max_new_tokens=60,
+            max_new_tokens=100,
             temperature=0.7,
             top_k=40,
             num_samples=1
@@ -214,7 +248,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Interactive chatbot inference")
     parser.add_argument("--checkpoint", type=str, default="./out/chatbot_best.pt",
-                        help="Path to model checkpoint")
+                        help="Path to model checkpoint (.pt or .safetensors)")
     parser.add_argument("--tokenizer", type=str, default="./out/standard_tokenizer.json",
                         help="Path to tokenizer")    
     parser.add_argument("--device", type=str, default="auto",
@@ -225,7 +259,7 @@ if __name__ == "__main__":
                         help="Sampling temperature")
     parser.add_argument("--top-k", type=int, default=40,
                         help="Top-k sampling")
-    parser.add_argument("--max-tokens", type=int, default=80,
+    parser.add_argument("--max-tokens", type=int, default=150,
                         help="Maximum tokens to generate")
 
     args = parser.parse_args()

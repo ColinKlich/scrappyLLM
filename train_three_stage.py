@@ -32,6 +32,7 @@ def stage1_base_training():
     """Stage 1: Base model on TinyStories (4-8 hours)"""
     cmd = f'''"{PYTHON}" -m training.train_scrappy \
         --data ./data/TinyStoriesV2-GPT4-train.txt \
+        --val_data ./data/TinyStoriesV2-GPT4-valid.txt \
         --tokenizer {TOKENIZER} \
         --out_dir ./out/stage1 \
         --epochs 50000 \
@@ -58,6 +59,7 @@ def stage2_shakespeare_finetuning():
         --out_dir ./out/stage2 \
         --epochs 10000 \
         --learning_rate 1e-4 \
+        --context_window 256 \
         --batch_size 32 \
         --warmup_iters 500 \
         --eval_interval 500 \

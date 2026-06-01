@@ -34,10 +34,10 @@ ENV/
 .DS_Store
 
 # Model outputs and checkpoints
-out/
 *.pt
 *.pth
 *.ckpt
+*.bin
 
 # Data
 data/*.txt
@@ -51,11 +51,6 @@ runs/
 logs/
 checkpoints/
 wandb/
-
-# Tokenizers
-*.json
-!pirate_bpe.json
-!scrappy_bpe.json
 
 # Jupyter
 .ipynb_checkpoints/
