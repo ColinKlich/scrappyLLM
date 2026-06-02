@@ -126,7 +126,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="./out/standard_tokenizer.json",
                         help="Output path")
     parser.add_argument("--data", nargs="+",
-                        default=["./data/tinyshakespeare.txt", "./data/Conversation.csv", "./data/TinyStoriesV2-GPT4-train.txt"],
+                        default=["./data/tinyshakespeare.txt", "./data/Conversation.csv", "./data/TinyStoriesV2-GPT4-train.txt", "./data/NQ-train_pairs.txt", "./data/literature-condensed.txt", "./data/NQ-open-train.txt"],
                         help="Data files to train tokenizer on")
 
     args = parser.parse_args()

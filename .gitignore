@@ -40,11 +40,11 @@ ENV/
 *.bin
 
 # Data
-data/*.txt
 data/*.bin
 data/*.npy
 *.bin
 *.npy
+TinyStories*.txt
 
 # Training artifacts
 runs/
