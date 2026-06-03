@@ -34,23 +34,50 @@ def load_pretrained_checkpoint(ckpt_path: str, config):
             f"context_window ({arch_context})"
         )
 
+    # Infer actual dimensions from state dict
+    model_state = checkpoint['model']
+    actual_n_embd = None
+    actual_n_layer = None
+    actual_block_size = None
+
+    if 'wte.weight' in model_state:
+        actual_n_embd = model_state['wte.weight'].shape[1]
+    if 'wpe.weight' in model_state:
+        actual_block_size = model_state['wpe.weight'].shape[0]
+
+    # Count layers
+    layer_indices = set()
+    for key in model_state.keys():
+        if key.startswith('layers.'):
+            parts = key.split('.')
+            if len(parts) > 1 and parts[1].isdigit():
+                layer_indices.add(int(parts[1]))
+    if layer_indices:
+        actual_n_layer = max(layer_indices) + 1
+
     # Build ModelConfig from checkpoint config
     if isinstance(arch_config, dict):
         model_config = ModelConfig(
             vocab_size=arch_config.get('vocab_size', 8192),
-            block_size=arch_config.get('context_window', arch_config.get('block_size', 128)),
-            n_layer=arch_config.get('n_layer', 4),
+            block_size=actual_block_size or arch_config.get('context_window', arch_config.get('block_size', 128)),
+            n_layer=actual_n_layer or arch_config.get('n_layer', 4),
             n_head=arch_config.get('n_head', 8),
-            n_embd=arch_config.get('d_model', arch_config.get('n_embd', 128))
+            n_embd=actual_n_embd or arch_config.get('d_model', arch_config.get('n_embd', 128))
         )
     else:
         model_config = ModelConfig(
             vocab_size=getattr(arch_config, 'vocab_size', 8192),
-            block_size=getattr(arch_config, 'context_window', getattr(arch_config, 'block_size', 128)),
-            n_layer=getattr(arch_config, 'n_layer', 4),
+            block_size=actual_block_size or getattr(arch_config, 'context_window', getattr(arch_config, 'block_size', 128)),
+            n_layer=actual_n_layer or getattr(arch_config, 'n_layer', 4),
             n_head=getattr(arch_config, 'n_head', 8),
-            n_embd=getattr(arch_config, 'd_model', getattr(arch_config, 'n_embd', 128))
+            n_embd=actual_n_embd or getattr(arch_config, 'd_model', getattr(arch_config, 'n_embd', 128))
         )
+
+    # Update training config to match the loaded model
+    config.context_window = model_config.block_size
+    config.n_layer = model_config.n_layer
+    config.n_head = model_config.n_head
+    config.d_model = model_config.n_embd
 
     model = GPT(model_config).to(config.device)
     model.load_state_dict(checkpoint['model'])
@@ -58,6 +85,10 @@ def load_pretrained_checkpoint(ckpt_path: str, config):
     print(f"Loaded pretrained model: {model.num_parameters() / 1e6:.2f}M params, "
           f"trained for {checkpoint['iter_num']} iters, val loss {checkpoint['val_loss']:.4f}")
     
+    if config.device == 'cuda' and torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs for training")
+        model = torch.nn.DataParallel(model)
+
     return model
 
 
@@ -150,7 +181,8 @@ def save_sft_checkpoint(model, optimizer, config, iter_num: int, val_loss: float
         best_val_loss: Best validation loss so far
         tag: Checkpoint tag (latest/best)
     """
-    raw_model = model._orig_mod if hasattr(model, '_orig_mod') else model
+    raw_model = model.module if hasattr(model, 'module') else model
+    raw_model = raw_model._orig_mod if hasattr(raw_model, '_orig_mod') else raw_model
     
     checkpoint = {
         'model': raw_model.state_dict(),

@@ -395,7 +395,8 @@ def evaluate_model(model, config):
 
 def save_checkpoint(model, optimizer, config, iter_num, val_loss, best_val_loss, tag='latest'):
     """Save training checkpoint."""
-    raw_model = model._orig_mod if hasattr(model, '_orig_mod') else model
+    raw_model = model.module if hasattr(model, 'module') else model
+    raw_model = raw_model._orig_mod if hasattr(raw_model, '_orig_mod') else raw_model
     
     checkpoint = {
         'model': raw_model.state_dict(),
@@ -502,60 +503,74 @@ def main():
         vocab_size = tokenizer.vocab_size
         print(f"Character vocabulary: {vocab_size} unique characters")
 
-    # Encode training text
-    print("Tokenizing training data...")
-    if hasattr(tokenizer, 'hf_tokenizer'):
-        # BPE tokenizer - encode in chunks for large files
-        chunk_size = 10_000_000  # 10MB chunks
-        train_encoded = []
-        for i in range(0, len(train_text), chunk_size):
-            chunk = train_text[i:i + chunk_size]
-            train_encoded.extend(tokenizer.encode(chunk))
-            progress = min(100, int((i + chunk_size) / len(train_text) * 100))
-            print(f"  Tokenizing training: {progress}%", end='\r')
-        print(f"  Tokenizing training: 100% - Complete!")
-    else:
-        # CharTokenizer - fast enough for full text
-        train_encoded = tokenizer.encode(train_text)
-
-    # Encode or split validation data
-    if use_separate_val:
-        print("Tokenizing validation data...")
-        if hasattr(tokenizer, 'hf_tokenizer'):
-            val_encoded = []
-            for i in range(0, len(val_text), chunk_size):
-                chunk = val_text[i:i + chunk_size]
-                val_encoded.extend(tokenizer.encode(chunk))
-                progress = min(100, int((i + chunk_size) / len(val_text) * 100))
-                print(f"  Tokenizing validation: {progress}%", end='\r')
-            print(f"  Tokenizing validation: 100% - Complete!")
-        else:
-            val_encoded = tokenizer.encode(val_text)
-
-        train_data = train_encoded
-        val_data = val_encoded
-    else:
-        # Split training data 80/10/10
-        train_size = int(0.8 * len(train_encoded))
-        val_size = int(0.1 * len(train_encoded))
-
-        train_data = train_encoded[:train_size]
-        val_data = train_encoded[train_size:train_size + val_size]
-
-    print(f"Training tokens: {len(train_data):,}")
-    print(f"Validation tokens: {len(val_data):,}")
-    
-    # Save to binary files for streaming
-    train_data_arr = np.array(train_data, dtype=np.uint16)
-    val_data_arr = np.array(val_data, dtype=np.uint16)
-    
     train_path = os.path.join(args.out_dir, 'train.bin')
     val_path = os.path.join(args.out_dir, 'val.bin')
+    eval_path = os.path.join(args.out_dir, 'eval.bin')
     
-    train_data_arr.tofile(train_path)
-    val_data_arr.tofile(val_path)
-    print(f"Saved training data ({len(train_data_arr):,} tokens) to {train_path}")
-    print(f"Saved validation data ({len(val_data_arr):,} tokens) to {val_path}")
+    if not os.path.exists(val_path) and os.path.exists(eval_path):
+        val_path = eval_path
+
+    if os.path.exists(train_path) and os.path.exists(val_path):
+        print(f"Found existing {train_path} and {val_path}. Skipping tokenization.")
+        train_data = np.fromfile(train_path, dtype=np.uint16).astype(np.int64)
+        val_data = np.fromfile(val_path, dtype=np.uint16).astype(np.int64)
+        print(f"Loaded training data ({len(train_data):,} tokens) from {train_path}")
+        print(f"Loaded validation data ({len(val_data):,} tokens) from {val_path}")
+    else:
+        # Encode training text
+        print("Tokenizing training data...")
+        if hasattr(tokenizer, 'hf_tokenizer'):
+            # BPE tokenizer - encode in chunks for large files
+            chunk_size = 10_000_000  # 10MB chunks
+            train_encoded = []
+            for i in range(0, len(train_text), chunk_size):
+                chunk = train_text[i:i + chunk_size]
+                train_encoded.extend(tokenizer.encode(chunk))
+                progress = min(100, int((i + chunk_size) / len(train_text) * 100))
+                print(f"  Tokenizing training: {progress}%", end='\r')
+            print(f"  Tokenizing training: 100% - Complete!")
+        else:
+            # CharTokenizer - fast enough for full text
+            train_encoded = tokenizer.encode(train_text)
+
+        # Encode or split validation data
+        if use_separate_val:
+            print("Tokenizing validation data...")
+            if hasattr(tokenizer, 'hf_tokenizer'):
+                val_encoded = []
+                for i in range(0, len(val_text), chunk_size):
+                    chunk = val_text[i:i + chunk_size]
+                    val_encoded.extend(tokenizer.encode(chunk))
+                    progress = min(100, int((i + chunk_size) / len(val_text) * 100))
+                    print(f"  Tokenizing validation: {progress}%", end='\r')
+                print(f"  Tokenizing validation: 100% - Complete!")
+            else:
+                val_encoded = tokenizer.encode(val_text)
+
+            train_data = train_encoded
+            val_data = val_encoded
+        else:
+            # Split training data 80/10/10
+            train_size = int(0.8 * len(train_encoded))
+            val_size = int(0.1 * len(train_encoded))
+
+            train_data = train_encoded[:train_size]
+            val_data = train_encoded[train_size:train_size + val_size]
+
+        print(f"Training tokens: {len(train_data):,}")
+        print(f"Validation tokens: {len(val_data):,}")
+        
+        # Save to binary files for streaming
+        train_data_arr = np.array(train_data, dtype=np.uint16)
+        val_data_arr = np.array(val_data, dtype=np.uint16)
+        
+        train_data_arr.tofile(train_path)
+        val_data_arr.tofile(val_path)
+        print(f"Saved training data ({len(train_data_arr):,} tokens) to {train_path}")
+        print(f"Saved validation data ({len(val_data_arr):,} tokens) to {val_path}")
+        
+        train_data = train_data_arr
+        val_data = val_data_arr
     
     # Update config with actual vocab size
     config.vocab_size = vocab_size
@@ -642,6 +657,10 @@ def main():
         model = GPT(model_config).to(config.device)
         print(f"Created new model: {model.num_parameters() / 1e6:.2f}M parameters")
     
+    if config.device == 'cuda' and torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs for training")
+        model = torch.nn.DataParallel(model)
+
     # Build optimizer
     decay_params = [p for p in model.parameters() if p.requires_grad and p.dim() >= 2]
     no_decay_params = [p for p in model.parameters() if p.requires_grad and p.dim() < 2]

@@ -11,9 +11,9 @@ from pathlib import Path
 from tokenizers import Tokenizer as HFTokenizer
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Whitespace
+from tokenizers.pre_tokenizers import ByteLevel
+from tokenizers.decoders import ByteLevel as ByteLevelDecoder
 from tokenizers.processors import TemplateProcessing
-from tokenizers.decoders import BPEDecoder
 
 
 def collect_data_files(data_paths):
@@ -116,10 +116,10 @@ def build_standard_tokenizer(
         show_progress=True
     )
 
-    tokenizer.pre_tokenizer = Whitespace()
+    tokenizer.pre_tokenizer = ByteLevel(add_prefix_space=False)
 
     # IMPORTANT: Add decoder to properly handle spaces
-    tokenizer.decoder = BPEDecoder(suffix="</w>")
+    tokenizer.decoder = ByteLevelDecoder()
 
     # Train on all files
     tokenizer.train(files=temp_files, trainer=trainer)

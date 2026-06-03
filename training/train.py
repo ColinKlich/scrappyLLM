@@ -115,7 +115,8 @@ def save_checkpoint(
     best_val_loss: float, tag: str = 'latest'
 ):
     """Save training checkpoint."""
-    raw_model = model._orig_mod if hasattr(model, '_orig_mod') else model
+    raw_model = model.module if hasattr(model, 'module') else model
+    raw_model = raw_model._orig_mod if hasattr(raw_model, '_orig_mod') else raw_model
     
     checkpoint = {
         'model': raw_model.state_dict(),
@@ -374,6 +375,10 @@ def main():
 
     model = GPT(model_config).to(config.device)
     
+    if config.device == 'cuda' and torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs for training")
+        model = torch.nn.DataParallel(model)
+
     # Build optimizer
     optimizer = build_optimizer(model, config)
     

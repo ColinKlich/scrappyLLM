@@ -130,7 +130,8 @@ def _run_training_loop(model, tokenizer, train_examples, val_examples, optimizer
                 best_val_loss = val_loss
                 print(f"  -> New best validation loss!")
 
-            raw_model = model._orig_mod if hasattr(model, '_orig_mod') else model
+            raw_model = model.module if hasattr(model, 'module') else model
+            raw_model = raw_model._orig_mod if hasattr(raw_model, '_orig_mod') else raw_model
             checkpoint = {
                 'model': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict(),
@@ -255,6 +256,9 @@ def finetune_chatbot(
             )
             model = GPT(model_config).to(device)
             print(f"Created model: {model.num_parameters() / 1e6:.2f}M parameters")
+            if device == 'cuda' and torch.cuda.device_count() > 1:
+                model = torch.nn.DataParallel(model)
+
 
             # Load conversation data and start training
             train_examples, val_examples = load_conversation_data(data_path, tokenizer, max_context=context_window)
@@ -356,6 +360,9 @@ def finetune_chatbot(
                 model = GPT(model_config).to(device)
                 model.load_state_dict(checkpoint['model'])
                 print(f"Loaded model: {model.num_parameters() / 1e6:.2f}M parameters")
+                if device == 'cuda' and torch.cuda.device_count() > 1:
+                    model = torch.nn.DataParallel(model)
+
 
                 # Continue to training with loaded model
                 train_examples, val_examples = load_conversation_data(data_path, tokenizer, max_context=context_window)
@@ -504,6 +511,9 @@ def finetune_chatbot(
         model = GPT(model_config).to(device)
         model.load_state_dict(checkpoint['model'])
         print(f"Loaded model: {model.num_parameters() / 1e6:.2f}M parameters")
+        if device == 'cuda' and torch.cuda.device_count() > 1:
+            model = torch.nn.DataParallel(model)
+
         print(f"Tokenizer vocab size: {tokenizer.vocab_size}")
 
     else:
@@ -531,6 +541,9 @@ def finetune_chatbot(
         )
         model = GPT(model_config).to(device)
         print(f"Created model: {model.num_parameters() / 1e6:.2f}M parameters")
+        if device == 'cuda' and torch.cuda.device_count() > 1:
+            model = torch.nn.DataParallel(model)
+
 
     # Load conversation data
     context_window = model.config.block_size
@@ -594,7 +607,8 @@ def finetune_chatbot(
                 best_val_loss = val_loss
                 print(f"  -> New best validation loss!")
 
-            raw_model = model._orig_mod if hasattr(model, '_orig_mod') else model
+            raw_model = model.module if hasattr(model, 'module') else model
+            raw_model = raw_model._orig_mod if hasattr(raw_model, '_orig_mod') else raw_model
             checkpoint = {
                 'model': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict(),
