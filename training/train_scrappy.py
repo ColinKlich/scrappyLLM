@@ -580,14 +580,53 @@ def main():
         if ckpt_vocab != vocab_size:
             raise ValueError(f"Tokenizer mismatch: pretrained has {ckpt_vocab}, current has {vocab_size}")
 
-        # Extract config from checkpoint
+# Infer actual dimensions from state dict
+        model_state = ckpt['model']
+        actual_n_embd = None
+        actual_n_layer = None
+        actual_block_size = None
+
+        if 'wte.weight' in model_state:
+            actual_n_embd = model_state['wte.weight'].shape[1]
+        if 'wpe.weight' in model_state:
+            actual_block_size = model_state['wpe.weight'].shape[0]
+
+        # Count layers
+        layer_indices = set()
+        for key in model_state.keys():
+            if key.startswith('layers.'):
+                parts = key.split('.')
+                if len(parts) > 1 and parts[1].isdigit():
+                    layer_indices.add(int(parts[1]))
+        if layer_indices:
+            actual_n_layer = max(layer_indices) + 1
+
+        # Extract config from checkpoint with fallbacks
+        if isinstance(ckpt_config, dict):
+            ckpt_block_size = ckpt_config.get('context_window', ckpt_config.get('block_size', 128))
+            ckpt_n_layer = ckpt_config.get('n_layer', 4)
+            ckpt_n_head = ckpt_config.get('n_head', 8)
+            ckpt_n_embd = ckpt_config.get('d_model', ckpt_config.get('n_embd', 128))
+        else:
+            ckpt_block_size = getattr(ckpt_config, 'context_window', getattr(ckpt_config, 'block_size', 128))
+            ckpt_n_layer = getattr(ckpt_config, 'n_layer', 4)
+            ckpt_n_head = getattr(ckpt_config, 'n_head', 8)
+            ckpt_n_embd = getattr(ckpt_config, 'd_model', getattr(ckpt_config, 'n_embd', 128))
+
         model_config = ModelConfig(
             vocab_size=vocab_size,
-            block_size=ckpt_config.context_window if hasattr(ckpt_config, 'context_window') else ckpt_config.get('context_window', ckpt_config.get('block_size', 128)),
-            n_layer=ckpt_config.n_layer if hasattr(ckpt_config, 'n_layer') else ckpt_config.get('n_layer'),
-            n_head=ckpt_config.n_head if hasattr(ckpt_config, 'n_head') else ckpt_config.get('n_head'),
-            n_embd=ckpt_config.d_model if hasattr(ckpt_config, 'd_model') else ckpt_config.get('n_embd', ckpt_config.get('d_model'))
+            block_size=actual_block_size or ckpt_block_size,
+            n_layer=actual_n_layer or ckpt_n_layer,
+            n_head=ckpt_n_head,
+            n_embd=actual_n_embd or ckpt_n_embd
         )
+        
+        # Update training config to match the loaded model
+        config.context_window = model_config.block_size
+        config.n_layer = model_config.n_layer
+        config.n_head = model_config.n_head
+        config.d_model = model_config.n_embd
+
         model = GPT(model_config).to(config.device)
         model.load_state_dict(ckpt['model'])
         print(f"Loaded pretrained model: {model.num_parameters() / 1e6:.2f}M parameters")

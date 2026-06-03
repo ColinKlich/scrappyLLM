@@ -6,6 +6,7 @@ This tokenizer can be used across all training and fine-tuning tasks.
 
 import os
 import json
+import sys
 from pathlib import Path
 from tokenizers import Tokenizer as HFTokenizer
 from tokenizers.models import BPE
@@ -13,6 +14,36 @@ from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.processors import TemplateProcessing
 from tokenizers.decoders import BPEDecoder
+
+
+def collect_data_files(data_paths):
+    """Resolve file and directory paths into a flat list of .txt/.csv files."""
+    if isinstance(data_paths, str):
+        data_paths = [data_paths]
+
+    resolved_files = []
+    for path in data_paths:
+        p = Path(path)
+        if p.is_dir():
+            matched = sorted(p.rglob("*.txt")) + sorted(p.rglob("*.csv"))
+            if not matched:
+                print(f"Warning: no .txt or .csv files found in directory: {path}")
+            else:
+                resolved_files.extend(str(x) for x in matched)
+        elif p.is_file():
+            resolved_files.append(str(p))
+        else:
+            print(f"Warning: path not found, skipping: {path}")
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_files = []
+    for file_path in resolved_files:
+        if file_path not in seen:
+            seen.add(file_path)
+            unique_files.append(file_path)
+
+    return unique_files
 
 
 def build_standard_tokenizer(
@@ -126,17 +157,22 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="./out/standard_tokenizer.json",
                         help="Output path")
     parser.add_argument("--data", nargs="+",
-                        default=["./data/tinyshakespeare.txt", "./data/Conversation.csv", "./data/TinyStoriesV2-GPT4-train.txt", "./data/NQ-train_pairs.txt", "./data/literature-condensed.txt", "./data/NQ-open-train.txt"],
-                        help="Data files to train tokenizer on")
+                        default=["./data"],
+                        help="Data files or directories to train tokenizer on")
 
     args = parser.parse_args()
+
+    data_files = collect_data_files(args.data)
+    if not data_files:
+        print("Error: no valid .txt or .csv files found in the provided data paths.")
+        sys.exit(1)
 
     # Create output directory
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
     # Build tokenizer
     tokenizer = build_standard_tokenizer(
-        data_files=args.data,
+        data_files=data_files,
         vocab_size=args.vocab_size,
         output_path=args.output
     )
