@@ -155,7 +155,7 @@ def main():
         description="Convert PyTorch checkpoint to safetensors format"
     )
     parser.add_argument(
-        'checkpoint',
+        '--checkpoint',
         type=str,
         help='Path to .pt checkpoint file'
     )

@@ -101,6 +101,19 @@ def get_batch(examples, batch_size: int, context_window: int, device: str):
     return x, y
 
 
+def _resolve_model_config(model):
+    """Return the underlying model config even when wrapped by DataParallel."""
+    raw_model = getattr(model, 'module', model)
+    return getattr(raw_model, 'config', None)
+
+
+def _scalar_loss(loss):
+    """Reduce DataParallel gathered loss tensors to a scalar."""
+    if isinstance(loss, torch.Tensor) and loss.dim() > 0:
+        return loss.mean()
+    return loss
+
+
 def _run_training_loop(model, tokenizer, train_examples, val_examples, optimizer, config, learning_rate, warmup_iters, max_iters, eval_interval, log_interval, batch_size, context_window, device, out_dir):
     """Run the training loop (extracted to avoid code duplication)."""
     model.train()
@@ -135,7 +148,7 @@ def _run_training_loop(model, tokenizer, train_examples, val_examples, optimizer
             checkpoint = {
                 'model': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict(),
-                'config': model.config,
+                'config': _resolve_model_config(model),
                 'iter_num': iter_num,
                 'val_loss': val_loss,
                 'best_val_loss': best_val_loss,
@@ -151,6 +164,7 @@ def _run_training_loop(model, tokenizer, train_examples, val_examples, optimizer
 
         optimizer.zero_grad(set_to_none=True)
         _, loss = model(x, y)
+        loss = _scalar_loss(loss)
         loss.backward()
 
         # Gradient clipping
@@ -180,6 +194,7 @@ def estimate_loss(model, examples, config, num_batches: int = 10):
         x, y = get_batch(examples, config.batch_size, context_window, config.device)
         with torch.no_grad():
             _, loss = model(x, y)
+            loss = _scalar_loss(loss)
             losses.append(loss.item())
 
     model.train()
@@ -268,7 +283,7 @@ def finetune_chatbot(
 
             # Skip the rest of tokenizer/model loading
             config = Config(
-                vocab_size=model.config.vocab_size,
+                vocab_size=_resolve_model_config(model).vocab_size,
                 batch_size=batch_size,
                 context_window=context_window,
                 device=device,
@@ -371,7 +386,7 @@ def finetune_chatbot(
                     raise ValueError("No training examples loaded!")
 
                 config = Config(
-                    vocab_size=model.config.vocab_size,
+                    vocab_size=_resolve_model_config(model).vocab_size,
                     batch_size=batch_size,
                     context_window=context_window,
                     device=device,
@@ -546,7 +561,7 @@ def finetune_chatbot(
 
 
     # Load conversation data
-    context_window = model.config.block_size
+    context_window = _resolve_model_config(model).block_size
     train_examples, val_examples = load_conversation_data(data_path, tokenizer, max_context=context_window)
 
     if len(train_examples) == 0:
@@ -554,7 +569,7 @@ def finetune_chatbot(
 
     # Create config
     config = Config(
-        vocab_size=model.config.vocab_size,
+        vocab_size=_resolve_model_config(model).vocab_size,
         batch_size=batch_size,
         context_window=context_window,
         device=device,
@@ -612,7 +627,7 @@ def finetune_chatbot(
             checkpoint = {
                 'model': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict(),
-                'config': model.config,
+                'config': _resolve_model_config(model),
                 'iter_num': iter_num,
                 'val_loss': val_loss,
                 'best_val_loss': best_val_loss,
@@ -628,7 +643,7 @@ def finetune_chatbot(
 
         optimizer.zero_grad(set_to_none=True)
         _, loss = model(x, y)
-        loss.backward()
+        loss = _scalar_loss(loss)
 
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

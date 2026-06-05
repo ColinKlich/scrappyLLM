@@ -318,6 +318,11 @@ def train_scrappy(model, optimizer, config, print_logs=False):
         
         optimizer.zero_grad(set_to_none=True)
         _, loss = model(x, y)
+        # If using DataParallel, loss may be a vector gathered from multiple
+        # devices (one scalar per device). Ensure it's a scalar before
+        # calling backward by averaging across device dimension.
+        if isinstance(loss, torch.Tensor) and loss.dim() > 0:
+            loss = loss.mean()
         loss.backward()
         
         # Gradient clipping
@@ -385,6 +390,10 @@ def evaluate_model(model, config):
             x_batch, y_batch = x_batch.long().to(config.device), y_batch.long().to(config.device)
             
             _, loss = model(x_batch, y_batch)
+            # When evaluating under DataParallel, the returned loss might be
+            # a 1-D tensor (one value per device). Reduce to scalar first.
+            if isinstance(loss, torch.Tensor) and loss.dim() > 0:
+                loss = loss.mean()
             losses[k] = loss.item()
         
         out[split] = losses.mean().item()

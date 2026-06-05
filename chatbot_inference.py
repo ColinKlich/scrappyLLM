@@ -136,7 +136,7 @@ def load_chatbot(checkpoint_path: str, tokenizer_path: str, device: str = "auto"
     return model, tokenizer
 
 
-def chat_with_model(model, tokenizer, max_tokens: int = 80, temperature: float = 0.7, top_k: int = 40):
+def chat_with_model(model, tokenizer, max_tokens: int = 200, temperature: float = 0.7, top_k: int = 40):
     """Interactive chat session.
 
     Args:
@@ -225,7 +225,7 @@ def test_chatbot(model, tokenizer, test_questions: list = None):
             model,
             tokenizer,
             prompt,
-            max_new_tokens=100,
+            max_new_tokens=200,
             temperature=0.7,
             top_k=40,
             num_samples=1
